@@ -37,7 +37,7 @@ import pl.spcode.navauth.common.domain.credentials.UserCredentials
 import pl.spcode.navauth.common.infra.crypto.hasher.BCryptCredentialsHasher
 import pl.spcode.navauth.velocity.command.Permissions
 
-@Command(name = "forcesetpassword")
+@Command(name = "fsetpassword")
 @Permission(Permissions.ADMIN_FORCE_SET_PASSWORD)
 class ForceChangePasswordAdminCommand
 @Inject
