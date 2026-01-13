@@ -12,7 +12,7 @@ hero:
   actions:
     - theme: brand
       text: View docs
-      link: /markdown-examples
+      link: /offer
     - theme: alt
       text: Visit project GitHub page
       link: https://github.com/Navio1430/NavAuth
@@ -25,24 +25,24 @@ features:
   - icon: ⚡
     title: Setup & Run the plugin
     details: Go through the detailed description about how to configure and run NavAuth.
-    link: /setup
+    link: /setup # todo
   - icon: 🚀
     title: Migrate now
     details: Check how to migrate from other plugins like LibreLogin, AuthMe and FastLogin.
-    link: /migration
+    link: /migration/migration
   - icon: 🧩
     title: Requirements
     details: Check the requirements needed to run NavAuth.
-    link: /requirements
+    link: /requirements # todo
   - icon:
       src: https://pngimg.com/d/discord_PNG3.png
     title: Need support?
     details: Join our Discord server!
-    link: /todo - discord
+    link: https://discord.com/invite/WTtEQneRJb
   - icon: 🤝
     title: Contribute
     details: Learn how to contribute and build the future of Minecraft Authentication!
-    link: /todo - discord
+    link: https://discord.com/invite/WTtEQneRJb
 ---
 
 

@@ -18,9 +18,13 @@
 
 package pl.spcode.navauth.common.domain.auth.session
 
+import pl.spcode.navauth.api.domain.auth.AuthSessionType
+import pl.spcode.navauth.api.event.NavAuthEventBus
+import pl.spcode.navauth.common.domain.event.UserAuthenticatedEventInternal
 import pl.spcode.navauth.common.domain.player.PlayerAdapter
+import pl.spcode.navauth.common.infra.NavAuthEventBusInternal
 
-abstract class AuthSession<T : PlayerAdapter>(val playerAdapter: T) {
+abstract class AuthSession<T : PlayerAdapter>(val playerAdapter: T, val eventBus: NavAuthEventBus) {
 
   abstract fun getSessionType(): AuthSessionType
 
@@ -38,6 +42,8 @@ abstract class AuthSession<T : PlayerAdapter>(val playerAdapter: T) {
   fun authenticate() {
     isAuthenticated = true
     state = AuthSessionState.AUTHENTICATED
+    eventBus as NavAuthEventBusInternal
+    eventBus.post(UserAuthenticatedEventInternal(playerAdapter, getSessionType()))
     onAuthenticated()
   }
 }

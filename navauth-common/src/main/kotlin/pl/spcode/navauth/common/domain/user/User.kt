@@ -19,10 +19,17 @@
 package pl.spcode.navauth.common.domain.user
 
 import java.util.UUID
+import pl.spcode.navauth.api.domain.AuthUser
 
-@JvmInline value class UserUuid(val value: UUID)
+@JvmInline
+value class UserUuid(val value: UUID) {
+  override fun toString(): String = value.toString()
+}
 
-@JvmInline value class MojangId(val value: UUID)
+@JvmInline
+value class MojangId(val value: UUID) {
+  override fun toString(): String = value.toString()
+}
 
 @JvmInline
 value class Username(val value: String) {
@@ -57,6 +64,24 @@ private constructor(
 
   fun toNonPremium(): User {
     return copy(mojangUuid = null, credentialsRequired = true)
+  }
+
+  fun withCredentialsRequired(required: Boolean = true) = copy(credentialsRequired = required)
+
+  fun toAuthUser(): AuthUser {
+    return object : AuthUser {
+      override fun getUUID(): UUID {
+        return this@User.uuid.value
+      }
+
+      override fun getMojangUUID(): UUID? {
+        return this@User.mojangUuid?.value
+      }
+
+      override fun getUsername(): String {
+        return this@User.username.value
+      }
+    }
   }
 
   override fun toString(): String {

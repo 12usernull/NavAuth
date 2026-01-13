@@ -27,8 +27,16 @@ import pl.spcode.navauth.common.domain.credentials.HashingAlgorithm
 class UserCredentialsRecord(
   // one-to-one relationship with a user entity
   @DatabaseField(id = true) var uuid: UUID = UUID.randomUUID(),
-  @DatabaseField val passwordHash: String = "",
-  @DatabaseField val algo: HashingAlgorithm = HashingAlgorithm.BCRYPT,
-  @DatabaseField val twoFactorSecret: String = "",
-  @DatabaseField val twoFactorEnabled: Boolean = false,
-)
+  @DatabaseField val passwordHash: String? = null,
+  @DatabaseField val algo: HashingAlgorithm? = null,
+  @DatabaseField val twoFactorSecret: String? = null,
+) {
+  init {
+    // only this check is reliable because this object can be created by an ORM with all null values
+    if (passwordHash != null) {
+      require(algo != null) { "algo must not be null" }
+    }
+
+    // do not check other things as this object can be initialized with null values
+  }
+}

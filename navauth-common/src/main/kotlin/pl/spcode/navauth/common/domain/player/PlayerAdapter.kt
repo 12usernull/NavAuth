@@ -18,7 +18,20 @@
 
 package pl.spcode.navauth.common.domain.player
 
-interface PlayerAdapter {
+import java.util.UUID
+import pl.spcode.navauth.api.domain.AuthPlayer
+import pl.spcode.navauth.common.domain.common.IPAddress
+import pl.spcode.navauth.common.domain.user.UserUuid
+
+interface PlayerAdapter : AuthPlayer {
+
+  override fun getIdentifier(): UUID {
+    return getUuid().value
+  }
+
+  fun getIPAddress(): IPAddress
+
+  fun getUuid(): UserUuid
 
   fun disconnect(reason: DisconnectReason)
 

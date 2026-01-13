@@ -20,15 +20,21 @@ package pl.spcode.navauth.common.application.user
 
 import com.google.inject.Inject
 import com.google.inject.Singleton
+import pl.spcode.navauth.api.event.NavAuthEventBus
+import pl.spcode.navauth.api.event.user.UserNonPremiumMigrationEvent
+import pl.spcode.navauth.api.event.user.UserPremiumMigrationEvent
+import pl.spcode.navauth.api.event.user.UserUsernameMigrationEvent
 import pl.spcode.navauth.common.application.credentials.UserCredentialsService
 import pl.spcode.navauth.common.application.mojang.MojangProfileService
 import pl.spcode.navauth.common.domain.common.TransactionService
+import pl.spcode.navauth.common.domain.credentials.TOTPSecret
 import pl.spcode.navauth.common.domain.credentials.UserCredentials
 import pl.spcode.navauth.common.domain.user.MojangId
 import pl.spcode.navauth.common.domain.user.User
 import pl.spcode.navauth.common.domain.user.UserRepository
 import pl.spcode.navauth.common.domain.user.UserUuid
 import pl.spcode.navauth.common.domain.user.Username
+import pl.spcode.navauth.common.infra.NavAuthEventBusInternal
 import pl.spcode.navauth.common.infra.crypto.HashedPassword
 
 @Singleton
@@ -39,6 +45,7 @@ constructor(
   val userCredentialsService: UserCredentialsService,
   val profileService: MojangProfileService,
   val txService: TransactionService,
+  val eventBus: NavAuthEventBus,
 ) {
 
   fun findUserByExactUsername(username: String): User? {
@@ -57,12 +64,15 @@ constructor(
     return userRepository.findByMojangUuid(uuid)
   }
 
-  fun storeUserWithCredentials(user: User, password: HashedPassword) {
+  fun createAndStoreUserWithNewCredentials(user: User, password: HashedPassword) {
     require(user.credentialsRequired) { "cannot store user without credentials required property" }
 
     txService.inTransaction {
       userRepository.save(user)
-      userCredentialsService.storeUserCredentials(user, UserCredentials.create(user, password))
+      userCredentialsService.storeUserCredentials(
+        user,
+        UserCredentials.create(user, password, null),
+      )
     }
   }
 
@@ -70,6 +80,19 @@ constructor(
     require(user.isPremium) { "cannot store non-premium user" }
 
     userRepository.save(user)
+  }
+
+  fun deleteUserCredentials(user: User): User {
+    return txService.inTransaction {
+      return@inTransaction deleteUserCredentialsNoTx(user)
+    }
+  }
+
+  private fun deleteUserCredentialsNoTx(user: User): User {
+    val user = user.withCredentialsRequired(false)
+    userRepository.save(user)
+    userCredentialsService.deleteUserCredentials(user)
+    return user
   }
 
   /**
@@ -81,16 +104,28 @@ constructor(
    * @return The updated user with premium account status.
    */
   fun migrateToPremium(user: User, mojangId: MojangId): User {
-    return txService.inTransaction {
-      val credentials = userCredentialsService.findCredentials(user)!!
-      // require credentials only if there's 2FA enabled
-      val requireCredentials = credentials.isTwoFactorEnabled
-      val premiumUser = User.premium(user.uuid, user.username, mojangId, requireCredentials)
+    val user =
+      txService.inTransaction {
+        val credentials = userCredentialsService.findCredentials(user)!!
+        // require credentials only if there's 2FA enabled
+        val requireCredentials = credentials.isTwoFactorEnabled
+        val premiumUser = User.premium(user.uuid, user.username, mojangId, requireCredentials)
 
-      // do not delete credentials in case a revert was requested
-      userRepository.save(premiumUser)
-      return@inTransaction premiumUser
-    }
+        userRepository.save(premiumUser)
+        if (requireCredentials) {
+          val newCredentials = credentials.withoutPassword()
+          userCredentialsService.storeUserCredentials(premiumUser, newCredentials)
+        } else {
+          deleteUserCredentialsNoTx(user)
+        }
+
+        return@inTransaction premiumUser
+      }
+
+    eventBus as NavAuthEventBusInternal
+    eventBus.post(UserPremiumMigrationEvent(user.toAuthUser()))
+
+    return user
   }
 
   /**
@@ -106,18 +141,24 @@ constructor(
   fun migrateToNonPremium(user: User, newPassword: HashedPassword): User {
     require(user.isPremium) { "cannot migrate non-premium user to non-premium" }
 
-    return txService.inTransaction {
-      // make sure the user has credentials required
-      val nonPremiumUser = user.toNonPremium()
-      userRepository.save(nonPremiumUser)
+    val user =
+      txService.inTransaction {
+        // make sure the user has credentials required
+        val nonPremiumUser = user.toNonPremium()
+        userRepository.save(nonPremiumUser)
 
-      val newCredentials =
-        userCredentialsService.findCredentials(nonPremiumUser)?.withNewPassword(newPassword)
-          ?: UserCredentials.create(nonPremiumUser, newPassword)
-      userCredentialsService.storeUserCredentials(nonPremiumUser, newCredentials)
+        val newCredentials =
+          userCredentialsService.findCredentials(nonPremiumUser)?.withNewPassword(newPassword)
+            ?: UserCredentials.create(nonPremiumUser, newPassword, null)
+        userCredentialsService.storeUserCredentials(nonPremiumUser, newCredentials)
 
-      return@inTransaction nonPremiumUser
-    }
+        return@inTransaction nonPremiumUser
+      }
+
+    eventBus as NavAuthEventBusInternal
+    eventBus.post(UserNonPremiumMigrationEvent(user.toAuthUser()))
+
+    return user
   }
 
   /**
@@ -131,9 +172,16 @@ constructor(
    * @throws IllegalArgumentException if the new username is the same as the existing username.
    */
   fun migrateUsername(user: User, newUsername: Username): User {
-    return txService.inTransaction {
-      return@inTransaction migrateUsernameNoTx(user, newUsername)
-    }
+    val oldUsername = user.username
+    val user =
+      txService.inTransaction {
+        return@inTransaction migrateUsernameNoTx(user, newUsername)
+      }
+
+    eventBus as NavAuthEventBusInternal
+    eventBus.post(UserUsernameMigrationEvent(user.toAuthUser(), oldUsername.value))
+
+    return user
   }
 
   /**
@@ -180,5 +228,37 @@ constructor(
     val newUser = user.withNewUsername(newUsername)
     userRepository.save(newUser)
     return newUser
+  }
+
+  fun enableTwoFactorAuth(user: User, totpSecret: TOTPSecret) {
+    txService.inTransaction {
+      val credentials =
+        userCredentialsService.findCredentials(user)
+          ?: UserCredentials.create(user, null, totpSecret)
+
+      val userWithCredentials =
+        if (!user.credentialsRequired) {
+          val user = user.withCredentialsRequired()
+          userRepository.save(user)
+          user
+        } else {
+          user
+        }
+
+      val newCredentials = credentials.withTotpSecret(totpSecret)
+      userCredentialsService.storeUserCredentials(userWithCredentials, newCredentials)
+    }
+  }
+
+  fun disableTwoFactorAuth(user: User) {
+    txService.inTransaction {
+      val credentials = userCredentialsService.findCredentials(user)!!
+      if (credentials.isPasswordRequired) {
+        val newCredentials = credentials.withoutTotpSecret()
+        userCredentialsService.storeUserCredentials(user, newCredentials)
+      } else {
+        deleteUserCredentialsNoTx(user)
+      }
+    }
   }
 }

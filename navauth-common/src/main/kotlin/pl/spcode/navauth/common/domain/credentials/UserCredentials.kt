@@ -21,10 +21,9 @@ package pl.spcode.navauth.common.domain.credentials
 import pl.spcode.navauth.common.domain.user.User
 import pl.spcode.navauth.common.domain.user.UserUuid
 import pl.spcode.navauth.common.infra.crypto.HashedPassword
-import pl.spcode.navauth.common.infra.crypto.PasswordHash
 
 @JvmInline
-value class TwoFactorSecret(val value: String) {
+value class TOTPSecret(val value: String) {
   init {
     require(value.length >= 16) { "Secret must be at least 16 characters long" }
   }
@@ -34,38 +33,53 @@ value class TwoFactorSecret(val value: String) {
 data class UserCredentials
 private constructor(
   val userUuid: UserUuid,
-  val passwordHash: PasswordHash,
-  val hashingAlgo: HashingAlgorithm,
-  val twoFactorSecret: TwoFactorSecret?,
+  // password can be null, because sometimes only 2FA is required
+  val hashedPassword: HashedPassword?,
+  val totpSecret: TOTPSecret?,
 ) {
 
+  init {
+    require(isValid()) { "Credentials must have either password or TOTP secret" }
+  }
+
+  val isPasswordRequired: Boolean
+    get() = hashedPassword != null
+
   val isTwoFactorEnabled: Boolean
-    get() = twoFactorSecret != null
+    get() = totpSecret != null
 
   companion object Factory {
-    fun create(
-      user: User,
-      password: HashedPassword,
-      twoFactorSecret: TwoFactorSecret? = null,
-    ): UserCredentials {
+    fun create(user: User, password: HashedPassword?, totpSecret: TOTPSecret?): UserCredentials {
       return UserCredentials(
         userUuid = user.uuid,
-        passwordHash = password.passwordHash,
-        hashingAlgo = password.algo,
-        twoFactorSecret = twoFactorSecret,
+        hashedPassword = password,
+        totpSecret = totpSecret,
       )
     }
 
     fun create(
       userUuid: UserUuid,
-      hash: PasswordHash,
-      algo: HashingAlgorithm,
-      twoFactorSecret: TwoFactorSecret? = null,
+      hashedPassword: HashedPassword?,
+      totpSecret: TOTPSecret?,
     ): UserCredentials {
-      return UserCredentials(userUuid, hash, algo, twoFactorSecret)
+      return UserCredentials(userUuid, hashedPassword, totpSecret)
     }
   }
 
-  fun withNewPassword(password: HashedPassword): UserCredentials =
-    copy(passwordHash = password.passwordHash)
+  fun withNewPassword(password: HashedPassword): UserCredentials = copy(hashedPassword = password)
+
+  fun withoutPassword(): UserCredentials {
+    require(totpSecret != null) {
+      "to create credentials without password, at least totpSecret must be set"
+    }
+    return copy(hashedPassword = null)
+  }
+
+  fun withTotpSecret(totpSecret: TOTPSecret): UserCredentials = copy(totpSecret = totpSecret)
+
+  fun withoutTotpSecret(): UserCredentials = copy(totpSecret = null)
+
+  fun isValid(): Boolean {
+    return hashedPassword != null || totpSecret != null
+  }
 }

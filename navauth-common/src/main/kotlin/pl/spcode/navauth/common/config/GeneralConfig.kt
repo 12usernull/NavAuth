@@ -21,6 +21,7 @@ package pl.spcode.navauth.common.config
 import eu.okaeri.configs.OkaeriConfig
 import eu.okaeri.configs.annotation.Comment
 import eu.okaeri.configs.annotation.Variable
+import java.time.Duration
 import pl.spcode.navauth.common.infra.database.DatabaseConfig
 
 open class GeneralConfig : OkaeriConfig() {
@@ -45,10 +46,20 @@ open class GeneralConfig : OkaeriConfig() {
   var limboServers: List<String> = listOf("limbo")
     protected set
 
-  @Comment("Maximum number of login retries before kicking the player.")
-  var maxLoginRetries: Int = 3
+  @Comment("Maximum number of login attempts before kicking the player.")
+  var maxLoginAttempts: Int = 3
+
+  @Comment("Maximum time of registration.")
+  var maxRegistrationDuration: Duration = Duration.ofSeconds(30)
+
+  @Comment("Maximum time of login.") var maxLoginDuration: Duration = Duration.ofSeconds(20)
 
   @Comment("Usernames config") var usernamesConfig: UsernamesConfig = UsernamesConfig()
+
+  @Comment("Two-factor (2FA) TOTP authentication config")
+  var twoFactorAuthConfig: TwoFactorAuthConfig = TwoFactorAuthConfig()
+
+  @Comment("Passwords config") var passwordsConfig: PasswordsConfig = PasswordsConfig()
 
   @Variable("CONFIG_VERSION")
   @Comment("Config version. DO NOT CHANGE this property!")

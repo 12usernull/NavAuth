@@ -28,11 +28,13 @@ import dev.rollczi.litecommands.annotations.context.Context
 import dev.rollczi.litecommands.annotations.execute.Execute
 import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.format.TextColor
+import pl.spcode.navauth.api.domain.auth.AuthSessionType
 import pl.spcode.navauth.common.annotation.Description
 import pl.spcode.navauth.common.application.auth.session.AuthSessionService
 import pl.spcode.navauth.common.application.user.UserService
+import pl.spcode.navauth.common.application.validator.PasswordValidator
+import pl.spcode.navauth.common.command.exception.MissingPermissionException
 import pl.spcode.navauth.common.component.TextColors
-import pl.spcode.navauth.common.domain.auth.session.AuthSessionType
 import pl.spcode.navauth.common.domain.user.User
 import pl.spcode.navauth.common.domain.user.UserUuid
 import pl.spcode.navauth.common.domain.user.Username
@@ -48,6 +50,7 @@ class RegisterCommand
 constructor(
   val authSessionService: AuthSessionService<VelocityPlayerAdapter>,
   val userService: UserService,
+  val passwordValidator: PasswordValidator,
 ) {
 
   @Async
@@ -56,7 +59,7 @@ constructor(
     "Creates a new account with specified password.",
     "Applicable only for non-premium players.",
     "If you want to disable this command for specific group, then set ",
-    "their '**${Permissions.USER_REGISTER}**' permission value to **FALSE**.",
+    "their `${Permissions.USER_REGISTER}` permission value to **FALSE**.",
   )
   fun register(
     @Context sender: Player,
@@ -65,31 +68,31 @@ constructor(
   ) {
     // if permission is set explicitly to FALSE
     if (sender.getPermissionValue(Permissions.USER_REGISTER) == Tristate.FALSE) {
-      // todo unify missing permission handler
-      sender.sendMessage(
-        Component.text("You don't have permission to use this command.", TextColors.RED)
-      )
-      return
+      throw MissingPermissionException(Permissions.USER_REGISTER)
     }
 
     val session = authSessionService.findSession(VelocityUniqueSessionId(sender))
-    if (session?.getSessionType() != AuthSessionType.REGISTER) {
+    if (session?.getSessionType() != AuthSessionType.REGISTER || session.isAuthenticated) {
       sender.sendMessage(Component.text("Can't use this command right now.", TextColors.RED))
       return
     }
 
-    if (password != repeatPassword) {
-      // todo send error message
+    if (!passwordValidator.isValid(password)) {
+      sender.sendMessage(Component.text("Password is invalid.", TextColors.RED))
       return
     }
 
-    userService.storeUserWithCredentials(
+    if (password != repeatPassword) {
+      sender.sendMessage(Component.text("Both passwords must match.", TextColors.RED))
+      return
+    }
+
+    userService.createAndStoreUserWithNewCredentials(
       User.nonPremium(UserUuid(sender.uniqueId), Username(sender.username)),
       BCryptCredentialsHasher().hash(password),
     )
     session.authenticate()
 
     sender.sendMessage(Component.text("Account created", TextColor.color(0, 200, 0)))
-    // todo move player to lobby
   }
 }

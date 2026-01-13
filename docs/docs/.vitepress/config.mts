@@ -1,12 +1,15 @@
 import { withBase, defineConfig } from 'vitepress';
 import { withSidebar } from 'vitepress-sidebar';
 
-let basePath = '/NavAuth';
+let basePath = '/NavAuth/docs';
 
 // https://vitepress.dev/reference/site-config
 const vitePressOptions = {
   base: basePath,
-
+  outDir: '../dist/docs',
+  ignoreDeadLinks: [
+    /\/javadoc\//
+  ],
   head: [['link', { rel: 'icon', href: basePath + '/navauth-logo.svg' }]],
   title: "NavAuth Docs",
   description: "Official NavAuth auth & auto-login plugin docs.",

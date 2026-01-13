@@ -21,14 +21,16 @@ package pl.spcode.navauth.velocity.application.auth.session
 import com.google.inject.Inject
 import com.google.inject.Singleton
 import com.velocitypowered.api.proxy.Player
+import pl.spcode.navauth.api.event.NavAuthEventBus
 import pl.spcode.navauth.common.application.auth.session.AuthSessionException
 import pl.spcode.navauth.common.application.auth.session.AuthSessionService
 import pl.spcode.navauth.common.application.credentials.UserCredentialsService
+import pl.spcode.navauth.common.config.GeneralConfig
 import pl.spcode.navauth.common.config.MessagesConfig
 import pl.spcode.navauth.common.domain.user.User
 import pl.spcode.navauth.velocity.application.event.VelocityEventDispatcher
+import pl.spcode.navauth.velocity.infra.auth.VelocityAutoLoginAuthSession
 import pl.spcode.navauth.velocity.infra.auth.VelocityLoginAuthSession
-import pl.spcode.navauth.velocity.infra.auth.VelocityPremiumAuthSession
 import pl.spcode.navauth.velocity.infra.auth.VelocityRegisterAuthSession
 import pl.spcode.navauth.velocity.infra.auth.VelocityUniqueSessionId
 import pl.spcode.navauth.velocity.infra.player.VelocityPlayerAdapter
@@ -44,7 +46,9 @@ constructor(
   val scheduler: NavAuthScheduler,
   val velocityEventDispatcher: VelocityEventDispatcher,
   val multification: VelocityMultification,
+  val generalConfig: GeneralConfig,
   val messagesConfig: MessagesConfig,
+  val eventBus: NavAuthEventBus,
 ) {
 
   fun createLoginAuthSession(
@@ -66,7 +70,9 @@ constructor(
         scheduler,
         velocityEventDispatcher,
         multification,
+        generalConfig,
         messagesConfig,
+        eventBus,
       )
     return authSessionService.registerSession(uniqueSessionId, session)
   }
@@ -82,6 +88,8 @@ constructor(
         velocityEventDispatcher,
         multification,
         messagesConfig,
+        generalConfig,
+        eventBus,
       )
     return authSessionService.registerSession(uniqueSessionId, session)
   }
@@ -89,8 +97,9 @@ constructor(
   fun createPremiumAuthSession(
     player: Player,
     uniqueSessionId: VelocityUniqueSessionId,
-  ): VelocityPremiumAuthSession {
-    val session = VelocityPremiumAuthSession(player, scheduler, multification, messagesConfig)
+  ): VelocityAutoLoginAuthSession {
+    val session =
+      VelocityAutoLoginAuthSession(player, scheduler, multification, messagesConfig, eventBus)
     return authSessionService.registerSession(uniqueSessionId, session)
   }
 }

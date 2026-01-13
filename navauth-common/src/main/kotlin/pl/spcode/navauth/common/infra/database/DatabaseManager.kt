@@ -26,8 +26,12 @@ import com.j256.ormlite.jdbc.DataSourceConnectionSource
 import com.j256.ormlite.support.ConnectionSource
 import com.j256.ormlite.table.TableUtils
 import com.zaxxer.hikari.HikariDataSource
+import java.sql.SQLException
+import java.sql.SQLSyntaxErrorException
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.reflect.KClass
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
 import pl.spcode.navauth.common.shared.PluginDirectory
 
 @Singleton
@@ -38,6 +42,8 @@ constructor(
   val entitiesRegistrar: EntitiesRegistrar,
   val pluginDirectory: PluginDirectory,
 ) {
+
+  private val logger: Logger = LoggerFactory.getLogger(DatabaseManager::class.java)
 
   private val dataSource: HikariDataSource = HikariDataSource()
   lateinit var connectionSource: ConnectionSource
@@ -64,16 +70,22 @@ constructor(
     val jdbcUrl: String =
       when (driverType) {
         DatabaseDriverType.H2_MEM,
+        DatabaseDriverType.H2_FILE,
         DatabaseDriverType.SQLITE -> {
           val dbFilename = pluginDirectory.path.resolve(config.database).toAbsolutePath().toString()
 
-          val supportedExtensions = listOf(".sqlite", ".sqlite3", ".db", ".db3", ".s3db", ".sl3")
+          val supportedExtensions =
+            listOf(".sqlite", ".sqlite3", ".db", ".db3", ".s3db", ".sl3", ".h2.db", ".mv.db")
 
           val finalFilename =
             if (supportedExtensions.any { dbFilename.endsWith(it, ignoreCase = true) }) {
               dbFilename
             } else {
-              "$dbFilename.db"
+              if (driverType == DatabaseDriverType.H2_FILE) {
+                dbFilename
+              } else {
+                "$dbFilename.db"
+              }
             }
 
           driverJdbcFormat.format(finalFilename)
@@ -119,9 +131,34 @@ constructor(
     } as Dao<T, ID>
   }
 
+  @Suppress("UNCHECKED_CAST")
+  fun <T : Any, ID : Any> getDao(entityClass: KClass<T>, idClass: KClass<ID>): Dao<T, ID> {
+
+    // idClass is intentionally unused – JVM cannot enforce it
+    return daoMap.computeIfAbsent(entityClass.java) {
+      DaoManager.createDao(connectionSource, entityClass.java)
+    } as Dao<T, ID>
+  }
+
   private fun initDatabase(entitiesRegistrar: EntitiesRegistrar) {
     entitiesRegistrar.getTypes().forEach {
-      TableUtils.createTableIfNotExists(connectionSource, it.java)
+      try {
+        TableUtils.createTableIfNotExists(connectionSource, it.java)
+      } catch (e: SQLException) {
+        // we catch the duplicate key name exception, because OrmLite doesn't handle it properly,
+        // the issue persists only while using MySQL or MariaDB
+        val cause = e.cause
+        if (
+          cause is SQLSyntaxErrorException &&
+            cause.errorCode == 1061 &&
+            e.message?.contains("CREATE INDEX") == true
+        ) {
+          logger.info("Tried to create index which already exists, skipping")
+          return@forEach
+        } else {
+          throw e
+        }
+      }
     }
   }
 }

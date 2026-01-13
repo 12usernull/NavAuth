@@ -27,7 +27,7 @@ import pl.spcode.navauth.common.application.validator.UsernameValidator
 import pl.spcode.navauth.common.config.MigrationConfig
 import pl.spcode.navauth.common.domain.common.TransactionService
 import pl.spcode.navauth.common.domain.credentials.HashingAlgorithm
-import pl.spcode.navauth.common.domain.credentials.TwoFactorSecret
+import pl.spcode.navauth.common.domain.credentials.TOTPSecret
 import pl.spcode.navauth.common.domain.credentials.UserCredentials
 import pl.spcode.navauth.common.domain.credentials.UserCredentialsRepository
 import pl.spcode.navauth.common.domain.user.*
@@ -58,7 +58,7 @@ constructor(
 
   lateinit var sourceDao: Dao<LibreLoginUser, UUID>
 
-  val entitiesRegistrar = EntitiesRegistrar().registerEntity(LibreLoginUser::class)
+  val entitiesRegistrar = EntitiesRegistrar().registerEntity(LibreLoginUser::class, UUID::class)
 
   val sourceDatabaseManager =
     DatabaseManager(migrationConfig.sourceDatabaseConfig, entitiesRegistrar, pluginDirectory)
@@ -76,7 +76,7 @@ constructor(
     }
   }
 
-  override fun getSourceRecordsCount(): Long {
+  override fun getSourceUsersCount(): Long {
     return sourceDao.countOf()
   }
 
@@ -105,30 +105,30 @@ constructor(
       return
     }
 
+    val hashedPassword = getHashedPassword(lUser)
+    if (!isPremium && hashedPassword == null && lUser.secret == null) {
+      logger.info(
+        "Non-Premium user ${lUser.lastNickname}:${lUser.uuid} has no password or 2FA secret which is an invalid record. Skipping record..."
+      )
+      return
+    }
+
+    val credentialsRequired: Boolean
+    if (lUser.secret != null || hashedPassword != null) {
+      val totpSecret = lUser.secret?.let { TOTPSecret(it) }
+      val credentials = UserCredentials.create(userUuid, hashedPassword, totpSecret)
+      userCredentialsRepository.save(credentials)
+      credentialsRequired = true
+    } else {
+      credentialsRequired = false
+    }
+
     val targetUser =
       if (isPremium) {
-        User.premium(userUuid, username, MojangId(lUser.premiumUuid!!), twoFactorEnabled)
+        User.premium(userUuid, username, MojangId(lUser.premiumUuid!!), credentialsRequired)
       } else {
         User.nonPremium(userUuid, username)
       }
-
-    val hashedPassword = getHashedPassword(lUser)
-    if (!isPremium && hashedPassword == null) {
-      logger.info(
-        "Non-Premium user ${lUser.lastNickname}:${lUser.uuid} has no password which is an invalid record. Skipping record..."
-      )
-      return
-    } else {
-      val twoFactorSecret = lUser.secret?.let { TwoFactorSecret(it) }
-      val credentials =
-        UserCredentials.create(
-          userUuid,
-          hashedPassword!!.passwordHash,
-          hashedPassword.algo,
-          twoFactorSecret,
-        )
-      userCredentialsRepository.save(credentials)
-    }
 
     userRepository.save(targetUser)
   }

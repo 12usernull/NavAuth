@@ -32,29 +32,32 @@ import dev.rollczi.litecommands.LiteCommands
 import dev.rollczi.litecommands.velocity.LiteVelocityFactory
 import java.nio.file.Path
 import net.kyori.adventure.text.Component
+import org.bstats.velocity.Metrics
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
-import pl.spcode.navauth.common.command.UserResolveException
-import pl.spcode.navauth.common.command.UserResolveExceptionHandler
-import pl.spcode.navauth.common.command.UsernameOrUuidParser
-import pl.spcode.navauth.common.command.UsernameOrUuidRaw
+import pl.spcode.navauth.api.NavAuthAPI
+import pl.spcode.navauth.api.event.NavAuthEventBus
+import pl.spcode.navauth.common.command.exception.MissingPermissionException
+import pl.spcode.navauth.common.command.exception.UserResolveException
+import pl.spcode.navauth.common.command.handler.UserResolveExceptionHandler
+import pl.spcode.navauth.common.command.user.UsernameOrUuidParser
+import pl.spcode.navauth.common.command.user.UsernameOrUuidRaw
 import pl.spcode.navauth.common.config.GeneralConfig
 import pl.spcode.navauth.common.config.MessagesConfig
 import pl.spcode.navauth.common.config.MigrationConfig
 import pl.spcode.navauth.common.infra.database.DatabaseManager
-import pl.spcode.navauth.common.module.DataPersistenceModule
-import pl.spcode.navauth.common.module.HttpClientModule
-import pl.spcode.navauth.common.module.MigrationModule
-import pl.spcode.navauth.common.module.PluginDirectoryModule
-import pl.spcode.navauth.common.module.ServicesModule
-import pl.spcode.navauth.common.module.YamlConfigModule
+import pl.spcode.navauth.common.module.*
 import pl.spcode.navauth.velocity.command.CommandsRegistry
-import pl.spcode.navauth.velocity.component.VelocityAudienceProvider
+import pl.spcode.navauth.velocity.infra.command.VelocityInvalidUsageHandler
+import pl.spcode.navauth.velocity.infra.command.VelocityMissingPermissionExceptionHandler
+import pl.spcode.navauth.velocity.infra.command.VelocityMissingPermissionHandler
+import pl.spcode.navauth.velocity.infra.component.VelocityAudienceProvider
 import pl.spcode.navauth.velocity.listener.VelocityListenersRegistry
+import pl.spcode.navauth.velocity.listener.application.UserAuthenticatedEventListener
 import pl.spcode.navauth.velocity.module.SchedulerModule
+import pl.spcode.navauth.velocity.module.VelocityCommandsModule
 import pl.spcode.navauth.velocity.module.VelocityMultificationsModule
 import pl.spcode.navauth.velocity.module.VelocityServicesModule
-import pl.spcode.navauth.velocity.multification.VelocityMultification
 import pl.spcode.navauth.velocity.multification.VelocityViewerProvider
 
 @Singleton
@@ -64,6 +67,7 @@ constructor(
   val parentInjector: Injector,
   val proxyServer: ProxyServer,
   @param:DataDirectory val dataDirectory: Path,
+  val metricsFactory: Metrics.Factory,
 ) {
 
   private val logger: Logger = LoggerFactory.getLogger(NavAuthVelocity::class.java)
@@ -78,6 +82,10 @@ constructor(
       logger.info("Initializing NavAuth plugin...")
       this.pluginInstance = pluginInstance
 
+      // initialize bstats
+      val pluginId = 28777
+      metricsFactory.make(pluginInstance, pluginId)
+
       // register self as listener because of the shutdown event
       proxyServer.eventManager.register(pluginInstance, this)
 
@@ -89,13 +97,8 @@ constructor(
         )
 
       val velocityViewerProvider = VelocityViewerProvider(proxyServer)
-      val velocityMultification = VelocityMultification(MessagesConfig(), velocityViewerProvider)
       val messagesConfigModule =
-        YamlConfigModule(
-          MessagesConfig::class,
-          dataDirectory.resolve("messages.yml").toFile(),
-          velocityMultification,
-        )
+        YamlConfigModule(MessagesConfig::class, dataDirectory.resolve("messages.yml").toFile())
 
       val migrationConfigModule =
         YamlConfigModule(MigrationConfig::class, dataDirectory.resolve("migration.yml").toFile())
@@ -107,7 +110,9 @@ constructor(
           generalConfigModule,
           messagesConfigModule,
           migrationConfigModule,
-          VelocityMultificationsModule(velocityMultification),
+          EventsModule(),
+          VelocityMultificationsModule(velocityViewerProvider),
+          VelocityCommandsModule(),
           SchedulerModule(pluginInstance, proxyServer.scheduler),
           HttpClientModule(),
           DataPersistenceModule(),
@@ -116,7 +121,13 @@ constructor(
           MigrationModule(),
         )
 
+      val eventBus = injector.getInstance(NavAuthEventBus::class.java)
+      eventBus.register(injector.getInstance(UserAuthenticatedEventListener::class.java))
+
       connectAndInitDatabase()
+
+      val apiImpl = injector.getInstance(NavAuthApiImpl::class.java)
+      NavAuthAPI.setAPIInstance(apiImpl)
 
       registerListeners(injector)
       registerCommands(injector)
@@ -144,6 +155,12 @@ constructor(
           UserResolveException::class.java,
           UserResolveExceptionHandler(VelocityAudienceProvider(proxyServer)),
         )
+        .exception(
+          MissingPermissionException::class.java,
+          injector.getInstance(VelocityMissingPermissionExceptionHandler::class.java),
+        )
+        .missingPermission(injector.getInstance(VelocityMissingPermissionHandler::class.java))
+        .invalidUsage(injector.getInstance(VelocityInvalidUsageHandler::class.java))
         .build()
   }
 

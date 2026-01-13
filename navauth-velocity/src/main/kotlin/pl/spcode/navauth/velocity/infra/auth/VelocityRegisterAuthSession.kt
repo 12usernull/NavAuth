@@ -21,6 +21,8 @@ package pl.spcode.navauth.velocity.infra.auth
 import com.velocitypowered.api.proxy.Player
 import com.velocitypowered.api.scheduler.ScheduledTask
 import java.time.Duration
+import pl.spcode.navauth.api.event.NavAuthEventBus
+import pl.spcode.navauth.common.config.GeneralConfig
 import pl.spcode.navauth.common.config.MessagesConfig
 import pl.spcode.navauth.common.infra.auth.RegisterAuthSession
 import pl.spcode.navauth.velocity.application.event.VelocityEventDispatcher
@@ -34,7 +36,9 @@ class VelocityRegisterAuthSession(
   val velocityEventDispatcher: VelocityEventDispatcher,
   val multification: VelocityMultification,
   val messagesConfig: MessagesConfig,
-) : RegisterAuthSession<VelocityPlayerAdapter>(VelocityPlayerAdapter(player)) {
+  val generalConfig: GeneralConfig,
+  eventBus: NavAuthEventBus,
+) : RegisterAuthSession<VelocityPlayerAdapter>(VelocityPlayerAdapter(player), eventBus) {
 
   val notifyMessageTask: ScheduledTask
   val disconnectPlayerTask: ScheduledTask
@@ -45,7 +49,7 @@ class VelocityRegisterAuthSession(
         .buildTask(
           Runnable { player.disconnect(messagesConfig.registerTimeExceededError.toComponent()) }
         )
-        .delay(Duration.ofSeconds(5))
+        .delay(generalConfig.maxRegistrationDuration)
         .schedule()
 
     notifyMessageTask =
@@ -59,6 +63,7 @@ class VelocityRegisterAuthSession(
               .send()
           }
         )
+        .delay(Duration.ofSeconds(1))
         .repeat(Duration.ofSeconds(3))
         .schedule()
   }

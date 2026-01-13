@@ -106,7 +106,7 @@ constructor(
               usernameConflictDeniedResult(failureReason.premiumUsername)
             }
             is UsernameResFailureReason.UsernameMigrationFailedUsernameAlreadyTaken -> {
-              usernameMigrationFailedUsernameAlreadyTakenResult(failureReason.username)
+              usernameMigrationFailedUsernameAlreadyTakenConflictResult(failureReason.username)
             }
           }
       }
@@ -178,6 +178,15 @@ constructor(
     val existingUser = handshakeSession.existingUser
     val uniqueSessionId = VelocityUniqueSessionId(player)
     if (handshakeSession.requestedEncryptionType == EncryptionType.ENFORCE_PREMIUM) {
+      if (existingUser != null) {
+        if (existingUser.credentialsRequired) {
+          val session =
+            authSessionFactory.createLoginAuthSession(player, uniqueSessionId, existingUser)
+          session.state = AuthSessionState.WAITING_FOR_ALLOCATION
+          return
+        }
+      }
+
       val session = authSessionFactory.createPremiumAuthSession(player, uniqueSessionId)
       // we are in postLogin event, so we can assume
       // that velocity did the verification for us
@@ -219,11 +228,13 @@ constructor(
   ): PreLoginEvent.PreLoginComponentResult {
 
     val component =
-      messagesConfig.usernameRequiredError
-        .withPlaceholders()
-        .placeholder("USERNAME", connUsername)
-        .placeholder("EXPECTED", requiredUsername)
-        .toComponent()
+      withSupportFooter(
+        messagesConfig.usernameRequiredError
+          .withPlaceholders()
+          .placeholder("USERNAME", connUsername)
+          .placeholder("EXPECTED", requiredUsername)
+          .toComponent()
+      )
 
     return PreLoginEvent.PreLoginComponentResult.denied(component)
   }
@@ -234,11 +245,13 @@ constructor(
   ): PreLoginEvent.PreLoginComponentResult {
 
     val component =
-      messagesConfig.premiumUsernameRequiredError
-        .withPlaceholders()
-        .placeholder("USERNAME", connUsername)
-        .placeholder("EXPECTED", requiredUsername)
-        .toComponent()
+      withSupportFooter(
+        messagesConfig.premiumUsernameRequiredError
+          .withPlaceholders()
+          .placeholder("USERNAME", connUsername)
+          .placeholder("EXPECTED", requiredUsername)
+          .toComponent()
+      )
 
     return PreLoginEvent.PreLoginComponentResult.denied(component)
   }
@@ -246,19 +259,31 @@ constructor(
   private fun usernameConflictDeniedResult(
     connUsername: String
   ): PreLoginEvent.PreLoginComponentResult {
-
-    val component =
-      messagesConfig.usernameConflictError
-        .withPlaceholders()
-        .placeholder("USERNAME", connUsername)
-        .toComponent()
-
-    return PreLoginEvent.PreLoginComponentResult.denied(component)
+    val comp =
+      withSupportFooter(
+        componentWithUsernamePlaceholder(messagesConfig.usernameConflictError, connUsername)
+      )
+    return PreLoginEvent.PreLoginComponentResult.denied(comp)
   }
 
-  private fun usernameMigrationFailedUsernameAlreadyTakenResult(
+  private fun usernameMigrationFailedUsernameAlreadyTakenConflictResult(
     username: String
   ): PreLoginEvent.PreLoginComponentResult {
-    TODO()
+    val comp =
+      withSupportFooter(
+        componentWithUsernamePlaceholder(messagesConfig.usernameAlreadyTakenConflictError, username)
+      )
+    return PreLoginEvent.PreLoginComponentResult.denied(comp)
+  }
+
+  private fun componentWithUsernamePlaceholder(
+    textComponent: pl.spcode.navauth.common.component.TextComponent,
+    username: String,
+  ): Component {
+    return textComponent.withPlaceholders().placeholder("USERNAME", username).toComponent()
+  }
+
+  private fun withSupportFooter(component: Component): Component {
+    return component.append(messagesConfig.supportFooter.toComponent())
   }
 }

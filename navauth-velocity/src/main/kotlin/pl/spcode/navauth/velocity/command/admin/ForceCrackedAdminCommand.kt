@@ -27,15 +27,16 @@ import dev.rollczi.litecommands.annotations.command.Command
 import dev.rollczi.litecommands.annotations.context.Context
 import dev.rollczi.litecommands.annotations.execute.Execute
 import dev.rollczi.litecommands.annotations.permission.Permission
-import me.uniodex.velocityrcon.commandsource.IRconCommandSource
 import java.util.Optional
+import me.uniodex.velocityrcon.commandsource.IRconCommandSource
 import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.minimessage.MiniMessage
+import pl.spcode.navauth.common.annotation.Description
+import pl.spcode.navauth.common.application.credentials.UserCredentialsService
 import pl.spcode.navauth.common.application.user.UserService
-import pl.spcode.navauth.common.command.UserArgumentResolver
-import pl.spcode.navauth.common.command.UsernameOrUuidRaw
+import pl.spcode.navauth.common.command.user.UserArgumentResolver
+import pl.spcode.navauth.common.command.user.UsernameOrUuidRaw
 import pl.spcode.navauth.common.component.TextColors
-import pl.spcode.navauth.common.infra.crypto.hasher.BCryptCredentialsHasher
 import pl.spcode.navauth.common.shared.utils.StringUtils.Companion.generateRandomString
 import pl.spcode.navauth.velocity.command.Permissions
 
@@ -43,10 +44,18 @@ import pl.spcode.navauth.velocity.command.Permissions
 @Permission(Permissions.ADMIN_FORCE_CRACKED)
 class ForceCrackedAdminCommand
 @Inject
-constructor(val userService: UserService, val userArgumentResolver: UserArgumentResolver) {
+constructor(
+  val userService: UserService,
+  val userArgumentResolver: UserArgumentResolver,
+  val userCredentialsService: UserCredentialsService,
+) {
 
-  @Execute
   @Async
+  @Execute
+  @Description(
+    "Forces a premium user account into non-premium (cracked) mode.",
+    "Generates or assigns a new password and updates the user’s authentication data accordingly.",
+  )
   fun forceCrackedMode(
     @Context sender: CommandSource,
     @Arg(value = "username|uuid") usernameOrUuidRaw: UsernameOrUuidRaw,
@@ -63,14 +72,15 @@ constructor(val userService: UserService, val userArgumentResolver: UserArgument
 
     val newPassword = newPasswordOpt.orElseGet { generateRandomString(8) }
 
-    // todo use hasher factory instead
-    userService.migrateToNonPremium(user, BCryptCredentialsHasher().hash(newPassword))
+    val hashedPassword = userCredentialsService.hashPassword(newPassword)
+    userService.migrateToNonPremium(user, hashedPassword)
 
-    val passwordText = if (sender is ConsoleCommandSource || sender is IRconCommandSource) {
-      "$newPassword"
-    } else {
-      "<aqua><bold><click:copy_to_clipboard:${newPassword}>CLICK HERE TO COPY</click>"
-    }
+    val passwordText =
+      if (sender is ConsoleCommandSource || sender is IRconCommandSource) {
+        "$newPassword"
+      } else {
+        "<aqua><bold><click:copy_to_clipboard:${newPassword}>CLICK HERE TO COPY</click>"
+      }
     sender.sendMessage(
       MiniMessage.miniMessage()
         .deserialize(

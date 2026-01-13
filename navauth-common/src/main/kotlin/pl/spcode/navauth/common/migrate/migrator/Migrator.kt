@@ -27,7 +27,7 @@ interface Migrator {
   fun init()
 
   /** @return the total number of user records in the source database */
-  fun getSourceRecordsCount(): Long
+  fun getSourceUsersCount(): Long
 
   /**
    * Migrates a chunk of records starting from the specified offset.

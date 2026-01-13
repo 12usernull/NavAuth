@@ -21,7 +21,9 @@ package pl.spcode.navauth.velocity.infra.auth
 import com.velocitypowered.api.proxy.Player
 import com.velocitypowered.api.scheduler.ScheduledTask
 import java.time.Duration
+import pl.spcode.navauth.api.event.NavAuthEventBus
 import pl.spcode.navauth.common.application.credentials.UserCredentialsService
+import pl.spcode.navauth.common.config.GeneralConfig
 import pl.spcode.navauth.common.config.MessagesConfig
 import pl.spcode.navauth.common.domain.credentials.UserCredentials
 import pl.spcode.navauth.common.infra.auth.LoginAuthSession
@@ -37,12 +39,16 @@ class VelocityLoginAuthSession(
   scheduler: NavAuthScheduler,
   val velocityEventDispatcher: VelocityEventDispatcher,
   val multification: VelocityMultification,
+  generalConfig: GeneralConfig,
   val messagesConfig: MessagesConfig,
+  eventBus: NavAuthEventBus,
 ) :
   LoginAuthSession<VelocityPlayerAdapter>(
     VelocityPlayerAdapter(player),
     userCredentials,
     userCredentialsService,
+    generalConfig.maxLoginAttempts,
+    eventBus,
   ) {
 
   val notifyMessageTask: ScheduledTask
@@ -54,22 +60,25 @@ class VelocityLoginAuthSession(
         .buildTask(
           Runnable { player.disconnect(messagesConfig.loginTimeExceededError.toComponent()) }
         )
-        .delay(Duration.ofSeconds(5))
+        .delay(generalConfig.maxLoginDuration)
         .schedule()
+
+    val notification =
+      if (userCredentials.isPasswordRequired && !userCredentials.isTwoFactorEnabled) {
+        messagesConfig.multification.loginPasswordOnlyInstruction
+      } else if (!userCredentials.isPasswordRequired && userCredentials.isTwoFactorEnabled) {
+        messagesConfig.multification.loginTwoFactorOnlyInstruction
+      } else {
+        messagesConfig.multification.loginPasswordAndTwoFactorInstruction
+      }
 
     notifyMessageTask =
       scheduler
         .buildTask(
-          Runnable {
-            multification
-              .create()
-              .notice(messagesConfig.multification.loginInstruction)
-              .player(player.uniqueId)
-              .send()
-          }
+          Runnable { multification.create().notice(notification).player(player.uniqueId).send() }
         )
         .delay(Duration.ofSeconds(1))
-        .repeat(Duration.ofSeconds(1))
+        .repeat(Duration.ofSeconds(3))
         .schedule()
   }
 

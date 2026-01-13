@@ -24,14 +24,16 @@ import com.velocitypowered.api.event.Subscribe
 import com.velocitypowered.api.event.connection.DisconnectEvent
 import com.velocitypowered.api.event.player.PlayerChooseInitialServerEvent
 import com.velocitypowered.api.event.player.ServerPreConnectEvent
-import com.velocitypowered.api.proxy.server.RegisteredServer
+import com.velocitypowered.api.proxy.Player
 import net.kyori.adventure.text.Component
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
+import pl.spcode.navauth.api.event.NavAuthEventBus
 import pl.spcode.navauth.common.application.auth.session.AuthSessionService
+import pl.spcode.navauth.common.application.user.UserActivitySessionService
 import pl.spcode.navauth.common.component.TextColors
+import pl.spcode.navauth.common.domain.auth.session.AuthSession
 import pl.spcode.navauth.common.domain.auth.session.AuthSessionState
-import pl.spcode.navauth.velocity.application.server.ServerNotFoundException
 import pl.spcode.navauth.velocity.application.server.VelocityServerSelectionService
 import pl.spcode.navauth.velocity.infra.auth.VelocityUniqueSessionId
 import pl.spcode.navauth.velocity.infra.player.VelocityPlayerAdapter
@@ -41,6 +43,8 @@ class ConnectionListeners
 constructor(
   val authSessionService: AuthSessionService<VelocityPlayerAdapter>,
   val serverSelectionService: VelocityServerSelectionService,
+  val userActivitySessionService: UserActivitySessionService,
+  val eventBus: NavAuthEventBus,
 ) {
 
   val logger: Logger = LoggerFactory.getLogger(ConnectionListeners::class.java)
@@ -48,108 +52,78 @@ constructor(
   @Subscribe
   fun onDisconnect(event: DisconnectEvent) {
     authSessionService.closeSession(VelocityUniqueSessionId(event.player))
+    userActivitySessionService.storePlayerSessionOnLeave(VelocityPlayerAdapter(event.player))
   }
 
   @Subscribe(order = PostOrder.FIRST)
   fun onServerConnect(event: ServerPreConnectEvent) {
-
     val player = event.player
-    val uniqueSessionId = VelocityUniqueSessionId(player)
-    val authSession = authSessionService.findSession(uniqueSessionId)
+    disconnectOnUnexpectedError(player) {
+      val uniqueSessionId = VelocityUniqueSessionId(player)
+      val authSession = authSessionService.findSession(uniqueSessionId)
 
-    if (authSession == null) {
-      logger.warn(
-        "OnServerConnect: player ${player.username} tried to connect without an auth session, disconnecting the player..."
-      )
-      player.disconnect(
-        Component.text(
-          "NavAuth: user tried to connect into a server without an auth session",
-          TextColors.RED,
-        )
-      )
-      event.result = ServerPreConnectEvent.ServerResult.denied()
-      return
-    }
-
-    if (!authSession.isAuthenticated) {
-      if (authSession.state != AuthSessionState.WAITING_FOR_HANDLER) {
+      if (authSession == null) {
         logger.warn(
-          "OnServerConnect: user {}:{} has bad auth state: {}",
-          player.username,
-          player.uniqueId,
-          authSession.toString(),
+          "OnServerConnect: player ${player.username} tried to connect without an auth session, disconnecting the player..."
         )
         player.disconnect(
-          Component.text("NavAuth: bad auth state on server connect", TextColors.RED)
+          Component.text(
+            "NavAuth: user tried to connect into a server without an auth session",
+            TextColors.RED,
+          )
         )
         event.result = ServerPreConnectEvent.ServerResult.denied()
-        return
+        return@disconnectOnUnexpectedError
+      }
+
+      if (!authSession.isAuthenticated) {
+        if (authSession.state != AuthSessionState.WAITING_FOR_HANDLER) {
+          logger.warn(
+            "OnServerConnect: user {}:{} has bad auth state: {}",
+            player.username,
+            player.uniqueId,
+            authSession.toString(),
+          )
+          player.disconnect(
+            Component.text("NavAuth: bad auth state on server connect", TextColors.RED)
+          )
+          event.result = ServerPreConnectEvent.ServerResult.denied()
+          return@disconnectOnUnexpectedError
+        }
       }
     }
   }
 
   @Subscribe(order = PostOrder.FIRST)
   fun onPlayerChooseInitialServer(event: PlayerChooseInitialServerEvent) {
-    // todo add try catch
-
     val player = event.player
-    val uniqueSessionId = VelocityUniqueSessionId(event.player)
-    val authSession = authSessionService.findSession(uniqueSessionId)
+    disconnectOnUnexpectedError(player) {
+      val uniqueSessionId = VelocityUniqueSessionId(event.player)
+      val authSession = authSessionService.findSession(uniqueSessionId)
 
-    if (authSession == null) {
-      logger.warn(
-        "PlayerChooseInitialServer: server tried to pick initial server for ${player.username} user without an auth session, disconnecting the player..."
-      )
-      player.disconnect(
-        Component.text(
-          "NavAuth: server tried to choose an initial server for you without an auth session",
-          TextColors.RED,
-        )
-      )
-      return
-    } else {
-      logger.debug(
-        "PlayerChooseInitialServerEvent: found auth session for user {}: {}",
-        player.username,
-        authSession,
-      )
-    }
-
-    if (authSession.isAuthenticated) {
-      setInitialServerAuthenticated(event)
-    } else {
-      if (authSession.state != AuthSessionState.WAITING_FOR_ALLOCATION) {
+      if (authSession == null) {
         logger.warn(
-          "PlayerChooseInitialServerEvent: server tried to choose initial server for user {}:{} with a bad auth state: {}",
-          player.username,
-          player.uniqueId,
-          authSession.toString(),
+          "PlayerChooseInitialServer: server tried to pick initial server for ${player.username} user without an auth session, disconnecting the player..."
         )
         player.disconnect(
           Component.text(
-            "NavAuth: can't choose an initial server with a bad auth state",
+            "NavAuth: server tried to choose an initial server for you without an auth session",
             TextColors.RED,
           )
         )
-        return
-      }
-      try {
-        val limbo = getLimboServerUnauthenticated(event)
-        event.setInitialServer(limbo)
+        return@disconnectOnUnexpectedError
+      } else {
         logger.debug(
-          "set user '{}' initial server to limbo server named {}",
+          "PlayerChooseInitialServerEvent: found auth session for user {}: {}",
           player.username,
-          limbo.serverInfo.name,
+          authSession,
         )
+      }
 
-        authSession.state = AuthSessionState.WAITING_FOR_HANDLER
-      } catch (ex: ServerNotFoundException) {
-        logger.warn(
-          "PlayerChooseInitialServer: failed to get limbo server for unauthenticated user '${player.username}'",
-          ex,
-        )
-        player.disconnect(Component.text("NavAuth: limbo server not found", TextColors.RED))
-        return
+      if (authSession.isAuthenticated) {
+        setInitialServerAuthenticated(event)
+      } else {
+        setInitialLimboUnauthenticated(event, authSession)
       }
     }
   }
@@ -160,39 +134,69 @@ constructor(
    */
   private fun setInitialServerAuthenticated(event: PlayerChooseInitialServerEvent) {
     val player = event.player
-    val backend: RegisteredServer?
-    try {
-      backend = serverSelectionService.getInitialServer(player)
-
-      if (backend != null) {
-        logger.debug(
-          "set user '{}' initial server to '{}'",
-          player.username,
-          backend.serverInfo.name,
-        )
-        event.setInitialServer(backend)
-      }
-    } catch (ex: ServerNotFoundException) {
+    val initialServer = serverSelectionService.getInitialServer(player)
+    if (initialServer == null) {
       logger.debug(
-        "PlayerChooseInitialServer: initial server not found for an authenticated user '${player.username}'",
-        ex,
-      )
-      player.disconnect(
-        Component.text("NavAuth: initial server not found '${ex.serverName}'", TextColors.RED)
+        "PlayerChooseInitialServer: initial server not found for an authenticated user '${player.username}'"
       )
       return
     }
+
+    logger.debug(
+      "PlayerChooseInitialServer: set user '{}' initial server to '{}'",
+      player.username,
+      initialServer.serverInfo.name,
+    )
+    event.setInitialServer(initialServer)
   }
 
-  /**
-   * @return RegisteredServer if found, otherwise null if server has not been found and player was
-   *   disconnected
-   * @throws ServerNotFoundException if no registered limbo was found
-   */
-  private fun getLimboServerUnauthenticated(
-    event: PlayerChooseInitialServerEvent
-  ): RegisteredServer {
+  fun setInitialLimboUnauthenticated(
+    event: PlayerChooseInitialServerEvent,
+    authSession: AuthSession<VelocityPlayerAdapter>,
+  ) {
     val player = event.player
-    return serverSelectionService.getLimboServer(player)
+    if (authSession.state != AuthSessionState.WAITING_FOR_ALLOCATION) {
+      logger.warn(
+        "PlayerChooseInitialServerEvent: server tried to choose initial limbo for unauthenticated user {}:{} with a bad auth state: {}",
+        player.username,
+        player.uniqueId,
+        authSession.toString(),
+      )
+      player.disconnect(
+        Component.text(
+          "NavAuth: can't choose an initial limbo with a bad auth state",
+          TextColors.RED,
+        )
+      )
+      return
+    }
+
+    val limbo = serverSelectionService.getLimboServer(player)
+    if (limbo == null) {
+      logger.debug(
+        "PlayerChooseInitialServerEvent: no initial limbo was found for unauthenticated user '{}'",
+        player.username,
+      )
+      player.disconnect(Component.text("NavAuth: initial limbo server not found.", TextColors.RED))
+      return
+    }
+
+    event.setInitialServer(limbo)
+    logger.debug(
+      "set user '{}' initial server to limbo server named {}",
+      player.username,
+      limbo.serverInfo.name,
+    )
+
+    authSession.state = AuthSessionState.WAITING_FOR_HANDLER
+  }
+
+  private fun disconnectOnUnexpectedError(player: Player, block: () -> Unit) {
+    try {
+      block()
+    } catch (e: Throwable) {
+      player.disconnect(Component.text("NavAuth: internal error", TextColors.RED))
+      logger.error("unexpected internal error occurred", e)
+    }
   }
 }

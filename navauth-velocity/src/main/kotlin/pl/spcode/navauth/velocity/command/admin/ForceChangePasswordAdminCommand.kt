@@ -30,11 +30,9 @@ import net.kyori.adventure.text.Component
 import pl.spcode.navauth.common.annotation.Description
 import pl.spcode.navauth.common.application.credentials.UserCredentialsService
 import pl.spcode.navauth.common.application.user.UserService
-import pl.spcode.navauth.common.command.UserArgumentResolver
-import pl.spcode.navauth.common.command.UsernameOrUuidRaw
+import pl.spcode.navauth.common.command.user.UserArgumentResolver
+import pl.spcode.navauth.common.command.user.UsernameOrUuidRaw
 import pl.spcode.navauth.common.component.TextColors
-import pl.spcode.navauth.common.domain.credentials.UserCredentials
-import pl.spcode.navauth.common.infra.crypto.hasher.BCryptCredentialsHasher
 import pl.spcode.navauth.velocity.command.Permissions
 
 @Command(name = "fsetpassword")
@@ -69,9 +67,7 @@ constructor(
       return
     }
 
-    val newCredentials = UserCredentials.create(user, BCryptCredentialsHasher().hash(password))
-    userCredentialsService.storeUserCredentials(user, newCredentials)
-
+    userCredentialsService.updatePassword(user, password)
     sender.sendMessage(
       Component.text("Success! User '${user.username}' credentials set.", TextColors.GREEN)
     )

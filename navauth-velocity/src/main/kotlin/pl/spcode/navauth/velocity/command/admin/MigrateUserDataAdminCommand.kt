@@ -33,13 +33,13 @@ import pl.spcode.navauth.common.application.mojang.MojangProfileService
 import pl.spcode.navauth.common.application.user.UserService
 import pl.spcode.navauth.common.application.user.UsernameAlreadyTakenException
 import pl.spcode.navauth.common.application.validator.UsernameValidator
-import pl.spcode.navauth.common.command.UserArgumentResolver
-import pl.spcode.navauth.common.command.UsernameOrUuidRaw
+import pl.spcode.navauth.common.command.user.UserArgumentResolver
+import pl.spcode.navauth.common.command.user.UsernameOrUuidRaw
 import pl.spcode.navauth.common.component.TextColors
 import pl.spcode.navauth.common.domain.user.Username
 import pl.spcode.navauth.velocity.command.Permissions
 
-@Command(name = "navauth user")
+@Command(name = "migrateuser")
 @Permission(Permissions.ADMIN_MIGRATE_USER_DATA)
 class MigrateUserDataAdminCommand
 @Inject
@@ -52,8 +52,13 @@ constructor(
 ) {
 
   @Async
-  @Execute(name = "migrate")
-  @Description()
+  @Execute
+  @Description(
+    "Migrates user data from an existing cracked account to a new username.",
+    "The command validates usernames, checks for conflicts or premium accounts,",
+    "and safely transfers all stored data to the specified new account.",
+    "If you want to migrate premium user, then use /forcecracked command first.",
+  )
   fun migrateUserData(
     @Context sender: Player,
     @Arg(value = "username|uuid") usernameOrUuidRaw: UsernameOrUuidRaw,
@@ -64,7 +69,7 @@ constructor(
     if (user.isPremium) {
       sender.sendMessage(
         Component.text(
-          "Can't execute the command! Account '${user.username}' is set to premium mode. Use /navauth forcecracked command first.",
+          "Can't execute the command! Account '${user.username}' is set to premium mode. Use /forcecracked command first.",
           TextColors.RED,
         )
       )
@@ -100,8 +105,6 @@ constructor(
       )
       return
     }
-
-    // todo send api event
 
     proxyServer.getPlayer(user.username.value).ifPresent {
       it.disconnect(
